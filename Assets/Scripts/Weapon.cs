@@ -149,10 +149,25 @@ public class Weapon : MonoBehaviour
 
         SoundManager.Instance.PlayShootingSound(thisWeaponModel);
 
-        
         AddCameraShakeForWeapon();
 
-        
+        if (HitStop.Instance != null)
+        {
+            switch (thisWeaponModel)
+            {
+                case WeaponModel.M1911:
+                    break;
+                case WeaponModel.AK74:
+                    HitStop.Instance.Stop(0.02f);
+                    break;
+                case WeaponModel.Shotgun:
+                    HitStop.Instance.Stop(0.05f);
+                    break;
+                case WeaponModel.Uzi:
+                    break;
+            }
+        }
+
         PerformHitScan();
 
         readyToShoot = false;
@@ -180,55 +195,119 @@ public class Weapon : MonoBehaviour
             Invoke("FireWeapon", shootingDelay);
         }
     }
-
-    
     private void AddCameraShakeForWeapon()
     {
         if (CameraShaker.Instance == null) return;
-
-        
         switch (thisWeaponModel)
         {
             case WeaponModel.M1911:
-                CameraShaker.Instance.TriggerShake(0.06f, 0.04f);  
+                CameraShaker.Instance.TriggerShake(0.05f, 0.01f); 
                 break;
             case WeaponModel.AK74:
-                CameraShaker.Instance.TriggerShake(0.08f, 0.06f);  
+                CameraShaker.Instance.TriggerShake(0.06f, 0.015f);
                 break;
             case WeaponModel.Shotgun:
-                CameraShaker.Instance.TriggerShake(0.12f, 0.12f);  
+                CameraShaker.Instance.TriggerShake(0.15f, 0.04f);
                 break;
             case WeaponModel.Uzi:
-                CameraShaker.Instance.TriggerShake(0.04f, 0.03f);  
+                CameraShaker.Instance.TriggerShake(0.02f, 0.006f);
                 break;
             default:
-                CameraShaker.Instance.TriggerShake(0.06f, 0.04f);
+                CameraShaker.Instance.TriggerShake(0.03f, 0.015f);
                 break;
         }
     }
+private void PerformHitScan()
+{
+    Ray ray = Camera.main.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
 
-    
-    private void PerformHitScan()
+    if (Physics.Raycast(ray, out RaycastHit hit, 1000f))
     {
-        Ray ray = Camera.main.ViewportPointToRay(new Vector3(0.5f, 0.5f, 0));
-
-        if (Physics.Raycast(ray, out RaycastHit hit, 1000f))
+        ZombieSpawnController spawner = hit.collider.GetComponent<ZombieSpawnController>();
+        if (spawner != null)
         {
+            spawner.TakeDamage(weaponDamage);
             
-            ZombieSpawnController spawner = hit.collider.GetComponent<ZombieSpawnController>();
-            if (spawner != null)
+            if (CameraShaker.Instance != null)
             {
-                spawner.TakeDamage(weaponDamage);
-                
+                CameraShaker.Instance.TriggerShake(0.1f, 0.08f);
+            }
+            return;
+        }
+        
+        Enemy enemy = hit.collider.GetComponent<Enemy>();
+        if (enemy != null && !enemy.isDead)
+        {
+            float zombieHeight = 2f;
+            Collider col = enemy.GetComponent<Collider>();
+            if (col != null)
+            {
+                zombieHeight = col.bounds.size.y;
+            }
 
+            float hitHeight = hit.point.y - enemy.transform.position.y;
+            float relativeHeight = hitHeight / zombieHeight;
+            
+            bool isHeadshot = relativeHeight > 0.7f;
+            bool isLegShot = relativeHeight < 0.3f; 
+            
+            float damageMultiplier = 1f;
+            if (isHeadshot)
+            {
+                damageMultiplier = 2f;
+                Debug.Log("headshot detected?");
                 
                 if (CameraShaker.Instance != null)
                 {
-                    CameraShaker.Instance.TriggerShake(0.1f, 0.08f);
+                    CameraShaker.Instance.ShakeLight();
                 }
+            }
+            else if (isLegShot)
+            {
+                damageMultiplier = 0.8f;
+            }
+
+            int finalDamage = Mathf.RoundToInt(weaponDamage * damageMultiplier);
+            
+            Vector3 hitDirection = ray.direction;
+            hitDirection.y = 0;
+            hitDirection.Normalize();
+            
+            enemy.TakeDamage(finalDamage, isHeadshot, hit.point, hitDirection);
+            
+            if (GlobalReferences.Instance.bloodSprayEffect != null)
+            {
+                GameObject blood = Instantiate(
+                    GlobalReferences.Instance.bloodSprayEffect,
+                    hit.point,
+                    Quaternion.LookRotation(hit.normal)
+                );
+                
+                if (isHeadshot)
+                {
+                    blood.transform.localScale *= 1.5f;
+                }
+                
+                Destroy(blood, 5f);
+            }
+        }
+        
+        else if (hit.collider.CompareTag("Wall") || hit.collider.CompareTag("Target"))
+        {
+            if (GlobalReferences.Instance.bulletImpactEffectprefab != null)
+            {
+                GameObject hole = Instantiate(
+                    GlobalReferences.Instance.bulletImpactEffectprefab,
+                    hit.point,
+                    Quaternion.LookRotation(hit.normal)
+                );
+                
+                hole.transform.SetParent(hit.collider.transform);
+                Destroy(hole, 30f);
             }
         }
     }
+}
 
     private void Reload()
     {
