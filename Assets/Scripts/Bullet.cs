@@ -3,9 +3,7 @@ using UnityEngine;
 
 public class Bullet : MonoBehaviour
 {
-
     public int bulletDamage;
-
 
     private void OnCollisionEnter(Collision collision)
     {
@@ -25,11 +23,12 @@ public class Bullet : MonoBehaviour
 
         if (collision.gameObject.CompareTag("Zombie"))
         {
-            if (collision.gameObject.GetComponent<Enemy>().isDead)
+            Enemy enemy = collision.gameObject.GetComponent<Enemy>()
+            if (enemy != null && enemy.isDead)
             {
                 return;
             }
-            collision.gameObject.GetComponent<Enemy>().TakeDamage(bulletDamage);
+
             CreateBloodSprayEffect(collision);
             Destroy(gameObject);
         }
@@ -38,24 +37,32 @@ public class Bullet : MonoBehaviour
     private void CreateBloodSprayEffect(Collision collision)
     {
         ContactPoint contact = collision.contacts[0];
-        GameObject bloodspray = Instantiate(
-            GlobalReferences.Instance.bloodSprayEffect,
-            contact.point,
-            Quaternion.LookRotation(contact.normal)
-        );
-        bloodspray.transform.SetParent(collision.gameObject.transform);
+
+        if (GlobalReferences.Instance.bloodSprayEffect != null)
+        {
+            GameObject bloodspray = Instantiate(
+                GlobalReferences.Instance.bloodSprayEffect,
+                contact.point,
+                Quaternion.LookRotation(contact.normal)
+            );
+            Destroy(bloodspray, 5f);
+        }
     }
 
     void CreateBulletImpactEffect(Collision collision)
     {
-
         ContactPoint contact = collision.contacts[0];
-        GameObject hole = Instantiate(
-            GlobalReferences.Instance.bulletImpactEffectprefab,
-            contact.point,
-            Quaternion.LookRotation(contact.normal)
-        );
-        hole.transform.SetParent(collision.gameObject.transform);
+
+        if (GlobalReferences.Instance.bulletImpactEffectprefab != null)
+        {
+            GameObject hole = Instantiate(
+                GlobalReferences.Instance.bulletImpactEffectprefab,
+                contact.point,
+                Quaternion.LookRotation(contact.normal)
+            );
+
+            hole.transform.SetParent(collision.gameObject.transform);
+            Destroy(hole, 30f);
+        }
     }
 }
-
