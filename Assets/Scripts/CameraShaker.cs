@@ -5,7 +5,7 @@ public class CameraShaker : MonoBehaviour
 {
     public static CameraShaker Instance;
 
-    public float shakeSpeed = 50f
+    public float shakeSpeed = 50f;
     public float returnSpeed = 5f; 
 
     private Vector3 originalPos;

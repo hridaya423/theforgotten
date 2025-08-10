@@ -13,25 +13,37 @@ public class Enemy : MonoBehaviour
     private Collider[] ragdollColliders;
     private Rigidbody mainRigidbody;
 
+    [Header("Ragdoll Forces")]
     public float headshotForce = 50f;
     public float bodyForce = 30f;
     public float torqueAmount = 10f;
 
+    [Header("Slow Motion")]
     public bool enableKillSlowMo = true;
     public float slowMoChance = 0.3f;
     public float headshotSlowMoChance = 0.6f;
     public float slowMoTimeScale = 0.3f;
     public float slowMoDuration = 0.4f;
 
+    [Header("Disintegration")]
+    public Material particleMaterial;
+    public Color particleStartColor = new Color(0.8f, 0.4f, 0.2f);
+    public Color particleEndColor = new Color(0.3f, 0.15f, 0.05f);
+    public float disintegrationDelay = 3f;
+    public float disintegrationDuration = 2.5f;
+
     private static int recentKills = 0;
     private static float lastKillTime = 0;
 
-    public Material particleMaterial;
+    
+    private AudioSource[] audioSources;
+    private bool hasStoppedAudio = false;
 
     private void Start()
     {
         animator = GetComponent<Animator>();
         navAgent = GetComponent<NavMeshAgent>();
+        audioSources = GetComponents<AudioSource>();
         SetupRagdoll();
     }
 
@@ -112,6 +124,12 @@ public class Enemy : MonoBehaviour
                 TrackKill();
                 GlobalReferences.Instance.IncrementZombiesKilled();
 
+                
+                if (KillStreakManager.Instance != null)
+                {
+                    KillStreakManager.Instance.RegisterKill(transform.position, isHeadshot);
+                }
+
                 ZombieSpawnController spawnController = FindObjectOfType<ZombieSpawnController>();
                 if (spawnController != null)
                 {
@@ -122,25 +140,76 @@ public class Enemy : MonoBehaviour
                     navAgent.enabled = false;
 
                 ApplyRagdollDeath(hitPoint, hitDirection, isHeadshot);
-                SoundManager.Instance.zombieChannel1.PlayOneShot(SoundManager.Instance.zombieDeath);
+
+                
+                if (SoundManager.Instance != null && SoundManager.Instance.zombieChannel1 != null)
+                {
+                    SoundManager.Instance.zombieChannel1.PlayOneShot(SoundManager.Instance.zombieDeath);
+                }
+
+                
+                StopAllAudio();
 
                 if (enableKillSlowMo)
                 {
                     TriggerKillSlowMo(isHeadshot);
                 }
 
-                StartCoroutine(DespawnAfterDelay(5f));
+                StartCoroutine(DespawnAfterDelay(disintegrationDelay));
             }
         }
         else
         {
-            animator.SetTrigger("DAMAGE");
-            SoundManager.Instance.zombieChannel1.PlayOneShot(SoundManager.Instance.zombieHurt);
-
-            if (hitDirection != default && navAgent != null)
+            
+            if (!isDead)
             {
-                StartCoroutine(HitStagger(hitDirection));
+                animator.SetTrigger("DAMAGE");
+                if (SoundManager.Instance != null && SoundManager.Instance.zombieChannel1 != null)
+                {
+                    SoundManager.Instance.zombieChannel1.PlayOneShot(SoundManager.Instance.zombieHurt);
+                }
+
+                if (hitDirection != default && navAgent != null)
+                {
+                    StartCoroutine(HitStagger(hitDirection));
+                }
             }
+        }
+    }   
+
+    private void StopAllAudio()
+    {
+        if (hasStoppedAudio) return;
+        hasStoppedAudio = true;
+
+        
+        if (audioSources != null)
+        {
+            foreach (AudioSource source in audioSources)
+            {
+                if (source != null)
+                {
+                    source.Stop();
+                    source.enabled = false;
+                }
+            }
+        }
+
+        
+        AudioSource[] childAudioSources = GetComponentsInChildren<AudioSource>();
+        foreach (AudioSource source in childAudioSources)
+        {
+            if (source != null)
+            {
+                source.Stop();
+                source.enabled = false;
+            }
+        }
+
+        
+        if (animator != null)
+        {
+            animator.enabled = false;
         }
     }
 
@@ -335,31 +404,38 @@ public class Enemy : MonoBehaviour
         yield return new WaitForSeconds(0.2f);
     }
 
-    private void DetermineDeathAnimation(Vector3 hitPoint)
-    {
-    }
-
     private IEnumerator DespawnAfterDelay(float delay)
     {
         yield return new WaitForSeconds(delay);
+
+        
+        StopAllAudio();
+
         yield return StartCoroutine(Disintegrate());
         Destroy(gameObject);
     }
 
     private IEnumerator Disintegrate()
     {
+        
+        StopAllAudio();
+
+        
         Collider[] allColliders = GetComponentsInChildren<Collider>();
         foreach (Collider col in allColliders)
         {
-            col.enabled = false;
+            if (col != null)
+                col.enabled = false;
         }
 
         Renderer[] renderers = GetComponentsInChildren<Renderer>();
-        CreateDisintegrationParticles();
 
-        float dissolveTime = 2f;
+        
+        GameObject particleSystem = CreateDisintegrationEffect();
+
         float elapsed = 0f;
 
+        
         Material[] dissolveMaterials = new Material[renderers.Length];
         for (int i = 0; i < renderers.Length; i++)
         {
@@ -367,177 +443,196 @@ public class Enemy : MonoBehaviour
             {
                 dissolveMaterials[i] = new Material(renderers[i].material);
                 renderers[i].material = dissolveMaterials[i];
+
+                
+                if (dissolveMaterials[i].HasProperty("_Mode"))
+                {
+                    dissolveMaterials[i].SetInt("_Mode", 3); 
+                    dissolveMaterials[i].SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                    dissolveMaterials[i].SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                    dissolveMaterials[i].SetInt("_ZWrite", 0);
+                    dissolveMaterials[i].DisableKeyword("_ALPHATEST_ON");
+                    dissolveMaterials[i].EnableKeyword("_ALPHABLEND_ON");
+                    dissolveMaterials[i].DisableKeyword("_ALPHAPREMULTIPLY_ON");
+                    dissolveMaterials[i].renderQueue = 3000;
+                }
             }
         }
 
-        while (elapsed < dissolveTime)
+        
+        while (elapsed < disintegrationDuration)
         {
             elapsed += Time.deltaTime;
-            float t = elapsed / dissolveTime;
+            float t = elapsed / disintegrationDuration;
+
+            
+            float dissolveAmount = Mathf.SmoothStep(0f, 1f, t);
 
             for (int i = 0; i < renderers.Length; i++)
             {
                 if (renderers[i] != null && dissolveMaterials[i] != null)
                 {
+                    
                     Color color = dissolveMaterials[i].color;
-                    color.a = 1f - t;
+                    color.a = 1f - dissolveAmount;
                     dissolveMaterials[i].color = color;
 
                     if (dissolveMaterials[i].HasProperty("_Color"))
                     {
                         dissolveMaterials[i].SetColor("_Color", color);
                     }
-
-                    float noise = Mathf.PerlinNoise(Time.time * 3f, i * 0.1f);
-                    if (noise * (1f - t) < 0.3f)
-                    {
-                        renderers[i].enabled = false;
-                    }
                 }
             }
 
             yield return null;
         }
+
+        
+        foreach (Renderer r in renderers)
+        {
+            if (r != null)
+                r.enabled = false;
+        }
     }
 
-    private void CreateDisintegrationParticles()
+    private GameObject CreateDisintegrationEffect()
     {
-        Vector3 particlePos = Vector3.zero;
-        int count = 0;
-
-        foreach (Rigidbody rb in ragdollRigidbodies)
+        
+        Bounds zombieBounds = new Bounds(transform.position, Vector3.one);
+        Renderer[] renderers = GetComponentsInChildren<Renderer>();
+        if (renderers.Length > 0)
         {
-            if (rb == mainRigidbody) continue;
-            particlePos += rb.position;
-            count++;
+            zombieBounds = renderers[0].bounds;
+            foreach (Renderer r in renderers)
+            {
+                if (r != null && r.enabled)
+                    zombieBounds.Encapsulate(r.bounds);
+            }
         }
 
-        if (count > 0)
-            particlePos /= count;
-        else
-            particlePos = transform.position + Vector3.up * 0.5f;
-
-        GameObject particleObj = new GameObject("DisintegrationParticles");
-        particleObj.transform.position = particlePos;
-        particleObj.transform.rotation = Quaternion.identity;
+        
+        GameObject particleObj = new GameObject("ZombieDisintegration");
+        particleObj.transform.position = zombieBounds.center;
+        particleObj.transform.rotation = transform.rotation;
 
         ParticleSystem particles = particleObj.AddComponent<ParticleSystem>();
         ParticleSystemRenderer psRenderer = particleObj.GetComponent<ParticleSystemRenderer>();
 
+        
         if (particleMaterial != null)
         {
-            psRenderer.material = particleMaterial;
+            psRenderer.material = new Material(particleMaterial);
         }
         else
         {
-            Material fallbackMaterial = new Material(Shader.Find("Standard"));
-            fallbackMaterial.color = new Color(0.4f, 0.3f, 0.2f);
-            psRenderer.material = fallbackMaterial;
+            Material particleMat = new Material(Shader.Find("Sprites/Default"));
+            particleMat.color = particleStartColor;
+            psRenderer.material = particleMat;
         }
 
+        
         var main = particles.main;
-        main.playOnAwake = false;
-        main.duration = 0.1f;
+        main.duration = disintegrationDuration;
+        main.loop = false;
+        main.prewarm = false;
         main.startLifetime = 4f;
         main.startSpeed = 0.5f;
-        main.maxParticles = 15000;
-        main.startSize = 0.002f;
-        main.startColor = new Color(0.4f, 0.3f, 0.2f);
+        main.maxParticles = 8000;
         main.simulationSpace = ParticleSystemSimulationSpace.World;
-        main.loop = false;
+        main.startSize = new ParticleSystem.MinMaxCurve(0.02f, 0.06f);
+        main.gravityModifier = -0.3f; 
+        main.startColor = particleStartColor;
 
+        
         var emission = particles.emission;
         emission.enabled = true;
-        emission.rateOverTime = 0;
-        emission.SetBursts(new ParticleSystem.Burst[]
-        {
-            new ParticleSystem.Burst(0.0f, 1200)
-        });
+        emission.rateOverTime = 3000f / disintegrationDuration; 
 
+        
         var shape = particles.shape;
         shape.enabled = true;
-        shape.shapeType = ParticleSystemShapeType.Sphere;
-        shape.radius = 0.7f;
 
-        Mesh bodyMesh = GetBodyMesh();
-        if (bodyMesh != null)
+        
+        SkinnedMeshRenderer skinnedMesh = GetComponentInChildren<SkinnedMeshRenderer>();
+        if (skinnedMesh != null && skinnedMesh.sharedMesh != null)
         {
-            shape.shapeType = ParticleSystemShapeType.Mesh;
-            shape.mesh = bodyMesh;
-            shape.scale = Vector3.one * 0.8f;
+            shape.shapeType = ParticleSystemShapeType.SkinnedMeshRenderer;
+            shape.skinnedMeshRenderer = skinnedMesh;
+            shape.meshShapeType = ParticleSystemMeshShapeType.Triangle;
+            shape.normalOffset = 0.01f;
+        }
+        else
+        {
+            MeshFilter meshFilter = GetComponentInChildren<MeshFilter>();
+            if (meshFilter != null && meshFilter.sharedMesh != null)
+            {
+                shape.shapeType = ParticleSystemShapeType.Mesh;
+                shape.mesh = meshFilter.sharedMesh;
+                shape.meshShapeType = ParticleSystemMeshShapeType.Triangle;
+            }
+            else
+            {
+                
+                shape.shapeType = ParticleSystemShapeType.Box;
+                shape.scale = zombieBounds.size;
+            }
         }
 
-        var velocityOverLifetime = particles.velocityOverLifetime;
-        velocityOverLifetime.enabled = true;
-        velocityOverLifetime.space = ParticleSystemSimulationSpace.World;
-        velocityOverLifetime.x = new ParticleSystem.MinMaxCurve(-0.5f, 0.5f);
-        velocityOverLifetime.y = new ParticleSystem.MinMaxCurve(1.0f, 2.0f);
-        velocityOverLifetime.z = new ParticleSystem.MinMaxCurve(-0.5f, 0.5f);
+        
+        var velocity = particles.velocityOverLifetime;
+        velocity.enabled = true;
+        velocity.space = ParticleSystemSimulationSpace.World;
+        velocity.x = new ParticleSystem.MinMaxCurve(-0.1f, 0.1f);
+        velocity.y = new ParticleSystem.MinMaxCurve(0.5f, 1.5f); 
+        velocity.z = new ParticleSystem.MinMaxCurve(-0.1f, 0.1f);
 
+        
         var sizeOverLifetime = particles.sizeOverLifetime;
         sizeOverLifetime.enabled = true;
-        sizeOverLifetime.size = new ParticleSystem.MinMaxCurve(0.5f, new AnimationCurve(
-            new Keyframe(0f, 1f),
-            new Keyframe(0.3f, 0.5f),
-            new Keyframe(1f, 0.1f)
-        ));
+        AnimationCurve sizeCurve = AnimationCurve.EaseInOut(0f, 1f, 1f, 0.1f);
+        sizeOverLifetime.size = new ParticleSystem.MinMaxCurve(1f, sizeCurve);
 
+        
         var colorOverLifetime = particles.colorOverLifetime;
         colorOverLifetime.enabled = true;
         Gradient gradient = new Gradient();
         gradient.SetKeys(
             new GradientColorKey[] {
-                new GradientColorKey(new Color(0.5f, 0.4f, 0.3f), 0.0f),
-                new GradientColorKey(new Color(0.4f, 0.3f, 0.2f), 0.5f),
-                new GradientColorKey(new Color(0.3f, 0.2f, 0.1f), 1.0f)
+                new GradientColorKey(particleStartColor, 0f),
+                new GradientColorKey(particleEndColor, 1f)
             },
             new GradientAlphaKey[] {
-                new GradientAlphaKey(1.0f, 0.0f),
-                new GradientAlphaKey(0.5f, 0.7f),
-                new GradientAlphaKey(0.0f, 1.0f)
+                new GradientAlphaKey(1f, 0f),
+                new GradientAlphaKey(0.8f, 0.5f),
+                new GradientAlphaKey(0f, 1f)
             }
         );
         colorOverLifetime.color = gradient;
 
+        
         var noise = particles.noise;
         noise.enabled = true;
-        noise.strength = 0.2f;
-        noise.frequency = 1.0f;
-        noise.scrollSpeed = 0.3f;
-        noise.quality = ParticleSystemNoiseQuality.High;
+        noise.strength = 0.1f;
+        noise.frequency = 0.5f;
+        noise.damping = true;
 
-        var rotationOverLifetime = particles.rotationOverLifetime;
-        rotationOverLifetime.enabled = true;
-        rotationOverLifetime.z = new ParticleSystem.MinMaxCurve(10f, new AnimationCurve(
-            new Keyframe(0f, 0f),
-            new Keyframe(1f, 360f)
-        ));
-
+        
         psRenderer.renderMode = ParticleSystemRenderMode.Billboard;
-        psRenderer.alignment = ParticleSystemRenderSpace.World;
-        psRenderer.minParticleSize = 0.001f;
-        psRenderer.maxParticleSize = 0.005f;
+        psRenderer.alignment = ParticleSystemRenderSpace.View;
+        psRenderer.sortMode = ParticleSystemSortMode.Distance;
 
+        
         particles.Play();
-        Destroy(particleObj, 5f); 
+
+        
+        Destroy(particleObj, disintegrationDuration + 5f);
+
+        return particleObj;
     }
 
-    private Mesh GetBodyMesh()
+    private void OnDestroy()
     {
-        SkinnedMeshRenderer skinnedRenderer = GetComponentInChildren<SkinnedMeshRenderer>();
-        if (skinnedRenderer != null)
-        {
-            Mesh mesh = new Mesh();
-            skinnedRenderer.BakeMesh(mesh);
-            return mesh;
-        }
-
-        MeshFilter meshFilter = GetComponentInChildren<MeshFilter>();
-        if (meshFilter != null)
-        {
-            return meshFilter.mesh;
-        }
-
-        return null;
+        
+        StopAllAudio();
     }
 }

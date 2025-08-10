@@ -121,10 +121,10 @@ Rigidbody:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 19219833906775202}
-  serializedVersion: 4
+  serializedVersion: 5
   m_Mass: 3
-  m_Drag: 0
-  m_AngularDrag: 0.05
+  m_LinearDamping: 0
+  m_AngularDamping: 0.05
   m_CenterOfMass: {x: 0, y: 0, z: 0}
   m_InertiaTensor: {x: 1, y: 1, z: 1}
   m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
@@ -153,9 +153,15 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 934dba5c0fb57cd47b1b3ebea9d1dac7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  delay: 3
+  fuseTime: 1
   damageRadius: 20
   explosionForce: 1200
+  maxDamage: 200
+  maxShakeDistance: 20
+  closeShakeIntensity: 0.2
+  closeShakeDuration: 0.4
+  farShakeIntensity: 0.04
+  farShakeDuration: 0.15
   hasBeenThrown: 0
   throwableType: 1
 --- !u!114 &8014310186865527113
