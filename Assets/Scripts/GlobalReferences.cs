@@ -7,7 +7,6 @@ public class GlobalReferences : MonoBehaviour
 
     public GameObject bulletImpactEffectprefab;
     public GameObject grenadeExplosionEffect;
-    public GameObject smokeGrenadeEffect;
     public GameObject bloodSprayEffect;
     public GameObject zombiePrefab;
     public GameObject player;
@@ -17,15 +16,6 @@ public class GlobalReferences : MonoBehaviour
 
     public int waveNumber;
     public int zombiesKilled = 0;
-
-    [Header("Boss References")]
-    public GameObject bossPrefab; 
-    public int bossesKilled = 0;
-
-    [Header("Essence System")]
-    public int essenceCount = 0;
-    public int essencesPerPotion = 4;
-    [SerializeField] private AudioClip essenceCollectSound;
 
     private void Awake()
     {
@@ -45,48 +35,5 @@ public class GlobalReferences : MonoBehaviour
     public void IncrementZombiesKilled()
     {
         zombiesKilled++;
-    }
-
-    public void IncrementBossesKilled()
-    {
-        bossesKilled++;
-    }
-
-    public void AddPotion(int amount = 1)
-    {
-        potionCount += amount;
-        UpdatePotionUI();
-    }
-
-    public void AddEssence(int amount = 1)
-    {
-        essenceCount += amount;
-
-        
-        if (essenceCollectSound != null && SoundManager.Instance != null)
-        {
-            SoundManager.Instance.playerChannel.PlayOneShot(essenceCollectSound);
-        }
-
-        
-        
-
-        UpdatePotionUI();
-    }
-
-    private void UpdatePotionUI()
-    {
-        if (potionCountText != null)
-        {
-            
-            if (essenceCount > 0)
-            {
-                potionCountText.text = $"Potions: {potionCount} + ({essenceCount}/{essencesPerPotion})";
-            }
-            else
-            {
-                potionCountText.text = $"Potions: {potionCount}";
-            }
-        }
     }
 }

@@ -230,7 +230,7 @@ private void PerformHitScan()
             
             if (CameraShaker.Instance != null)
             {
-                CameraShaker.Instance.TriggerShake(0.1f, 0.08f);
+                CameraShaker.Instance.TriggerShake(0.08f, 0.04f);
             }
             return;
         }
@@ -255,7 +255,6 @@ private void PerformHitScan()
             if (isHeadshot)
             {
                 damageMultiplier = 2f;
-                Debug.Log("headshot detected?");
                 
                 if (CameraShaker.Instance != null)
                 {

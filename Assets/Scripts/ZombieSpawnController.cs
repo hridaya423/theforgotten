@@ -10,14 +10,13 @@ public interface IDamageable
     void TakeDamage(int damage);
 }
 
-
 public enum ZombieMutation
 {
     Normal,
     Runner,
     Tank,
     Screamer,
-    Exploder    
+    Exploder
 }
 
 public class ZombieSpawnController : MonoBehaviour, IDamageable
@@ -25,12 +24,12 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
     [Header("Wave Settings")]
     public float baseSpawnInterval = 10f;
     public float minSpawnInterval = 1f;
-    public float difficultyRampSpeed = 0.7f; 
+    public float difficultyRampSpeed = 0.7f;
     public int maxZombiesPerWave = 40;
 
     [Header("Spawner Health")]
     public int spawnerHealth = 5;
-    public GameObject spawnerVisual; 
+    public GameObject spawnerVisual;
     public ParticleSystem damageEffect;
     public ParticleSystem destructionEffect;
 
@@ -41,8 +40,8 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
 
     [Header("Mutation Settings")]
     [Range(0f, 1f)]
-    public float baseMutationChance = 0.1f; 
-    public float mutationChancePerWave = 0.05f; 
+    public float baseMutationChance = 0.1f;
+    public float mutationChancePerWave = 0.05f;
     public Color runnerColor = Color.green;
     public Color tankColor = Color.red;
     public Color screamerColor = Color.yellow;
@@ -71,7 +70,9 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
     public AudioClip mutationSound;
 
     
-    private int currentWave = 1;
+    private const float BASE_CHASE_SPEED = 1.5f;
+
+    public int currentWave = 1;
     private float currentSpawnInterval;
     private bool spawnerDestroyed = false;
     private int currentSpawnerHealth;
@@ -80,15 +81,16 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
     private Renderer spawnerRenderer;
     private Color originalColor;
 
-    
     private int zombiesSpawnedThisWave = 0;
     private float waveStartTime;
 
     private bool isRespawning = false;
-    private float respawnTimer = 15f; 
+    private float respawnTimer = 15f;
     private int originalSpawnerHealth;
 
-    
+    private Bounds playAreaBounds;
+    private bool hasBoundaries = false;
+
     private Dictionary<ZombieMutation, int> currentMutationCounts = new Dictionary<ZombieMutation, int>();
 
     private void Start()
@@ -97,13 +99,14 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
         InitializeUI();
         InitializeMutationCounts();
 
-        originalSpawnerHealth = spawnerHealth; 
+        originalSpawnerHealth = spawnerHealth;
         currentSpawnerHealth = spawnerHealth;
         currentSpawnInterval = baseSpawnInterval;
         waveStartTime = Time.time;
 
         UpdateUI();
         StartInfiniteSpawning();
+        InitializeBoundaries();
     }
 
     private void InitializeSpawner()
@@ -119,7 +122,6 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
             spawnerRenderer = spawnerVisual.GetComponent<Renderer>();
         }
 
-        
         if (spawnerRenderer == null)
         {
             spawnerRenderer = GetComponent<Renderer>();
@@ -130,7 +132,6 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
             spawnerRenderer = GetComponent<MeshRenderer>();
         }
 
-        
         if (spawnerRenderer != null && spawnerRenderer.material != null)
         {
             originalColor = spawnerRenderer.material.color;
@@ -148,6 +149,52 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
             Debug.LogWarning("Spawner tag not defined in project. Please create 'Spawner' tag in Tags and Layers.");
         }
     }
+
+    private void InitializeBoundaries()
+    {
+        GameObject[] borders = GameObject.FindGameObjectsWithTag("Border");
+        if (borders.Length == 0) return;
+
+        
+        playAreaBounds = new Bounds(transform.position, Vector3.zero);
+        foreach (GameObject border in borders)
+        {
+            Collider col = border.GetComponent<Collider>();
+            if (col != null)
+            {
+                playAreaBounds.Encapsulate(col.bounds);
+            }
+        }
+
+        
+        float shrinkAmount = 1.5f; 
+        Vector3 min = playAreaBounds.min;
+        Vector3 max = playAreaBounds.max;
+        playAreaBounds.SetMinMax(
+            new Vector3(min.x + shrinkAmount, min.y, min.z + shrinkAmount),
+            new Vector3(max.x - shrinkAmount, max.y, max.z - shrinkAmount)
+        );
+
+        hasBoundaries = true;
+
+        
+        if (!playAreaBounds.Contains(transform.position))
+        {
+            transform.position = playAreaBounds.ClosestPoint(transform.position);
+        }
+    }
+
+    private Vector3 ClampToBoundaries(Vector3 position)
+    {
+        if (!hasBoundaries) return position;
+
+        return new Vector3(
+            Mathf.Clamp(position.x, playAreaBounds.min.x, playAreaBounds.max.x),
+            position.y,
+            Mathf.Clamp(position.z, playAreaBounds.min.z, playAreaBounds.max.z)
+        );
+    }
+
 
     private void InitializeUI()
     {
@@ -210,7 +257,6 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
 
     private float CalculateSpawnInterval(int wave)
     {
-        
         float interval = baseSpawnInterval * Mathf.Pow(difficultyRampSpeed, wave * 1.2f);
         return Mathf.Max(interval, minSpawnInterval);
     }
@@ -224,7 +270,7 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
     private bool ShouldAdvanceWave()
     {
         float waveTime = Time.time - waveStartTime;
-        bool timeThreshold = waveTime > 60f; 
+        bool timeThreshold = waveTime > 60f;
         bool zombieThreshold = zombiesSpawnedThisWave >= GetMaxZombiesForWave(currentWave) * 2;
 
         return timeThreshold || zombieThreshold;
@@ -239,11 +285,8 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
         if (GlobalReferences.Instance != null)
             GlobalReferences.Instance.waveNumber = currentWave;
 
-        
-
         UpdateUI();
     }
-
 
     private void SpawnMutatedZombie()
     {
@@ -253,7 +296,6 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
         Vector3 spawnPosition = GetValidSpawnPosition();
         ZombieMutation mutation = DetermineZombieMutation();
 
-        
         GameObject prefabToUse = GetPrefabForMutation(mutation);
         if (prefabToUse == null)
         {
@@ -262,19 +304,23 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
 
         GameObject zombie = Instantiate(prefabToUse, spawnPosition, Quaternion.identity);
 
-        
+        if (hasBoundaries)
+        {
+            BoundaryConstraint constraint = zombie.AddComponent<BoundaryConstraint>();
+            constraint.Initialize(playAreaBounds);
+        }
+
+
         ApplyMutation(zombie, mutation);
 
         currentZombiesAlive.Add(zombie);
         currentMutationCounts[mutation]++;
 
-        
         if (mutation != ZombieMutation.Normal && mutationSound != null && SoundManager.Instance != null)
         {
             SoundManager.Instance.zombieChannel1.PlayOneShot(mutationSound);
         }
 
-        
         if (GlobalReferences.Instance.player != null)
         {
             Vector3 lookDirection = (GlobalReferences.Instance.player.transform.position - zombie.transform.position).normalized;
@@ -284,7 +330,7 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
             }
         }
 
-        
+
     }
 
     private ZombieMutation DetermineZombieMutation()
@@ -294,45 +340,37 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
         if (Random.value > mutationChance)
             return ZombieMutation.Normal;
 
-        
         float rand = Random.value;
 
-        
         if (currentWave >= 5)
         {
-            
-            if (rand < 0.25f) return ZombieMutation.Runner;      
-            else if (rand < 0.45f) return ZombieMutation.Tank;   
-            else if (rand < 0.70f) return ZombieMutation.Screamer; 
-            else return ZombieMutation.Exploder;                 
+            if (rand < 0.25f) return ZombieMutation.Runner;
+            else if (rand < 0.45f) return ZombieMutation.Tank;
+            else if (rand < 0.70f) return ZombieMutation.Screamer;
+            else return ZombieMutation.Exploder;
         }
         else if (currentWave >= 4)
         {
-            
-            if (rand < 0.35f) return ZombieMutation.Runner;      
-            else if (rand < 0.65f) return ZombieMutation.Tank;   
-            else return ZombieMutation.Screamer;                 
+            if (rand < 0.35f) return ZombieMutation.Runner;
+            else if (rand < 0.65f) return ZombieMutation.Tank;
+            else return ZombieMutation.Screamer;
         }
         else if (currentWave >= 3)
         {
-            
-            if (rand < 0.40f) return ZombieMutation.Runner;      
-            else if (rand < 0.80f) return ZombieMutation.Tank;   
-            else return ZombieMutation.Screamer;                 
+            if (rand < 0.40f) return ZombieMutation.Runner;
+            else if (rand < 0.80f) return ZombieMutation.Tank;
+            else return ZombieMutation.Screamer;
         }
         else if (currentWave >= 2)
         {
-            
-            if (rand < 0.60f) return ZombieMutation.Runner;      
-            else return ZombieMutation.Tank;                     
+            if (rand < 0.60f) return ZombieMutation.Runner;
+            else return ZombieMutation.Tank;
         }
         else
         {
-            
             return ZombieMutation.Runner;
         }
     }
-
 
     private float GetCurrentMutationChance()
     {
@@ -360,122 +398,113 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
     {
         var enemy = zombie.GetComponent<Enemy>();
         var navAgent = zombie.GetComponent<NavMeshAgent>();
-        var zombieScript = zombie.GetComponent<Zombie>();
         var animator = zombie.GetComponent<Animator>();
 
         switch (mutation)
         {
             case ZombieMutation.Runner:
                 
+                float runnerSpeed = BASE_CHASE_SPEED * 2;
+                float runnerSpeedMultiplier = 2; 
 
-                
                 if (animator != null)
                 {
                     
+                    animator.speed = runnerSpeedMultiplier; 
+
                     var controller = animator.runtimeAnimatorController;
                     if (controller != null)
                     {
-                        
                         var behaviors = animator.GetBehaviours<ZombieChaseState>();
                         foreach (var chaseBehavior in behaviors)
                         {
-                            chaseBehavior.chaseSpeed = 12f; 
+                            chaseBehavior.chaseSpeed = runnerSpeed;
                         }
                     }
 
-                    
                     if (navAgent != null)
                     {
-                        navAgent.speed = 12f;
-                        navAgent.acceleration = 12f; 
+                        navAgent.speed = runnerSpeed;
                     }
                 }
 
-                
                 if (enemy != null)
                 {
                     enemy.HP = Mathf.RoundToInt(enemy.HP * 0.5f);
                 }
 
-                
                 zombie.transform.localScale *= 0.9f;
                 ChangeZombieColor(zombie, runnerColor);
-
-                
                 break;
 
             case ZombieMutation.Tank:
                 
+                float tankSpeed = BASE_CHASE_SPEED * 0.7f;
+                float tankSpeedMultiplier = 0.7f; 
 
-                
                 if (animator != null)
                 {
+                    
+                    animator.speed = tankSpeedMultiplier; 
+
                     var behaviors = animator.GetBehaviours<ZombieChaseState>();
                     foreach (var chaseBehavior in behaviors)
                     {
-                        chaseBehavior.chaseSpeed = 4.2f; 
+                        chaseBehavior.chaseSpeed = tankSpeed;
                     }
 
-                    
                     if (navAgent != null)
                     {
-                        navAgent.speed = 4.2f;
-                        navAgent.acceleration = 6f; 
+                        navAgent.speed = tankSpeed;
+                        navAgent.acceleration = 6f;
                     }
                 }
 
-                
                 if (enemy != null)
                 {
                     enemy.HP = Mathf.RoundToInt(enemy.HP * 3f);
                 }
 
-                
-                if (zombieScript != null)
+                if (enemy != null)
                 {
-                    zombieScript.zombieDamage = Mathf.RoundToInt(zombieScript.zombieDamage * 1.5f);
+                    animator.GetComponent<ZombieAttackState>().attackDamage = (int)(30 * 1.5f);
                 }
 
-                
                 zombie.transform.localScale *= 1.2f;
                 ChangeZombieColor(zombie, tankColor);
-
-                
                 break;
 
             case ZombieMutation.Screamer:
                 
-                
-
                 ChangeZombieColor(zombie, screamerColor);
 
-                
                 var screamerBehavior = zombie.AddComponent<ScreamerBehavior>();
                 screamerBehavior.alertRadius = 20f;
                 screamerBehavior.cooldownTime = 5f;
-
-                
                 break;
 
             case ZombieMutation.Exploder:
                 
+                float exploderSpeed = BASE_CHASE_SPEED * 0.83f;
+                float exploderSpeedMultiplier = 0.83f; 
 
-                
                 if (animator != null)
                 {
+                    
+                    animator.speed = exploderSpeedMultiplier; 
+
                     var behaviors = animator.GetBehaviours<ZombieChaseState>();
                     foreach (var chaseBehavior in behaviors)
                     {
-                        chaseBehavior.chaseSpeed = 5f; 
+                        chaseBehavior.chaseSpeed = exploderSpeed;
                     }
 
                     if (navAgent != null)
                     {
-                        navAgent.speed = 5f;
+                        navAgent.speed = exploderSpeed;
                     }
                 }
 
-                
                 if (enemy != null)
                 {
                     enemy.HP = Mathf.RoundToInt(enemy.HP * 0.8f);
@@ -483,23 +512,18 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
 
                 ChangeZombieColor(zombie, exploderColor);
 
-                
                 var exploderBehavior = zombie.AddComponent<ExploderBehavior>();
                 exploderBehavior.explosionRange = 4f;
                 exploderBehavior.explosionDamage = 50;
-
-                
                 break;
         }
     }
-
 
     private void ChangeZombieColor(GameObject zombie, Color newColor)
     {
         Renderer[] renderers = zombie.GetComponentsInChildren<Renderer>();
         foreach (Renderer renderer in renderers)
         {
-            
             Material newMaterial = new Material(renderer.material);
             newMaterial.color = newColor;
             renderer.material = newMaterial;
@@ -512,24 +536,17 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
 
         currentSpawnerHealth -= damage;
 
-        
         StartCoroutine(FlashSpawner());
 
-        
         if (damageEffect != null)
         {
             damageEffect.Play();
         }
 
-        
         if (spawnerHitSound != null && SoundManager.Instance != null)
         {
             SoundManager.Instance.zombieChannel1.PlayOneShot(spawnerHitSound);
         }
-
-        
-
-        
 
         if (currentSpawnerHealth <= 0)
         {
@@ -541,7 +558,6 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
 
     private IEnumerator FlashSpawner()
     {
-        
         Renderer flashRenderer = spawnerRenderer;
 
         if (flashRenderer == null)
@@ -560,7 +576,6 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
             flashRenderer.material.color = Color.red;
             yield return new WaitForSeconds(0.2f);
 
-            
             if (!spawnerDestroyed && flashRenderer.enabled)
             {
                 flashRenderer.material.color = prevColor;
@@ -577,54 +592,43 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
             StopCoroutine(spawnCoroutine);
         }
 
-        
         if (destructionEffect != null)
         {
             destructionEffect.Play();
         }
 
-        
         if (spawnerDestroyedSound != null && SoundManager.Instance != null)
         {
             SoundManager.Instance.zombieChannel1.PlayOneShot(spawnerDestroyedSound);
         }
 
-        
         if (CameraShaker.Instance != null)
         {
             CameraShaker.Instance.TriggerShake(0.4f, 0.2f);
         }
 
-        
         HideSpawner();
 
-        
         Collider spawnerCollider = GetComponent<Collider>();
         if (spawnerCollider != null)
         {
             spawnerCollider.enabled = false;
         }
 
-        
-
-        
         isRespawning = true;
         Invoke(nameof(StartRespawnCountdown), 0.1f);
 
         UpdateUI();
     }
 
-    
     private void StartRespawnCountdown()
     {
-        
         if (gameObject.activeInHierarchy)
         {
             StartCoroutine(RespawnSpawner());
         }
         else
         {
-            
             Debug.LogWarning("GameObject inactive, using alternative respawn method");
             Invoke(nameof(RespawnSpawnerNow), respawnTimer);
         }
@@ -632,14 +636,11 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
 
     private void HideSpawner()
     {
-        
         if (spawnerVisual != null && spawnerVisual != gameObject)
         {
-            
             spawnerVisual.SetActive(false);
         }
 
-        
         Renderer spawnerMeshRenderer = GetComponent<Renderer>();
         if (spawnerMeshRenderer != null)
         {
@@ -652,11 +653,9 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
             meshRenderer.enabled = false;
         }
 
-        
         Renderer[] childRenderers = GetComponentsInChildren<Renderer>();
         foreach (Renderer renderer in childRenderers)
         {
-            
             if (renderer.GetComponent<ParticleSystem>() == null)
             {
                 renderer.enabled = false;
@@ -664,17 +663,13 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
         }
     }
 
-    
     private void ShowSpawner()
     {
-        
         if (spawnerVisual != null && spawnerVisual != gameObject)
         {
-            
             spawnerVisual.SetActive(true);
         }
 
-        
         Renderer spawnerMeshRenderer = GetComponent<Renderer>();
         if (spawnerMeshRenderer != null)
         {
@@ -687,7 +682,6 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
             meshRenderer.enabled = true;
         }
 
-        
         Renderer[] childRenderers = GetComponentsInChildren<Renderer>();
         foreach (Renderer renderer in childRenderers)
         {
@@ -695,16 +689,12 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
         }
     }
 
-
-
-    
     private IEnumerator RespawnSpawner()
     {
-        if (!isRespawning) yield break; 
+        if (!isRespawning) yield break;
 
         float countdown = respawnTimer;
 
-        
         while (countdown > 0 && isRespawning)
         {
             if (spawnerHealthText != null)
@@ -717,56 +707,37 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
             yield return null;
         }
 
-        
         if (isRespawning)
         {
             RespawnSpawnerNow();
         }
     }
 
-    
     private void RespawnSpawnerNow()
     {
-        
-
-        
         currentSpawnerHealth = originalSpawnerHealth;
         spawnerDestroyed = false;
         isRespawning = false;
 
-        
         AdvanceToNextWave();
 
-        
         ShowSpawner();
 
-        
         StartCoroutine(RespawnFlashEffect());
 
-        
         Collider spawnerCollider = GetComponent<Collider>();
         if (spawnerCollider != null)
         {
             spawnerCollider.enabled = true;
         }
 
-        
-        if (SoundManager.Instance != null && SoundManager.Instance.zombieChannel1 != null)
-        {
-            
-            
-        }
-
-        
         StartInfiniteSpawning();
 
         UpdateUI();
     }
 
-    
     private IEnumerator RespawnFlashEffect()
     {
-        
         Renderer flashRenderer = spawnerRenderer;
 
         if (flashRenderer == null)
@@ -781,7 +752,6 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
 
         if (flashRenderer != null)
         {
-            
             for (int i = 0; i < 3; i++)
             {
                 if (flashRenderer.material != null)
@@ -802,19 +772,17 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
 
     private void UpdateUI()
     {
-        
         if (currentWaveText != null)
         {
             currentWaveText.text = currentWave.ToString();
             currentWaveText.gameObject.SetActive(true);
         }
 
-        
         if (nextWaveText != null)
         {
             if (isRespawning)
             {
-                nextWaveText.text = (currentWave + 1).ToString(); 
+                nextWaveText.text = (currentWave + 1).ToString();
             }
             else
             {
@@ -823,7 +791,6 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
             nextWaveText.gameObject.SetActive(true);
         }
 
-        
         if (spawnerHealthText != null)
         {
             if (isRespawning)
@@ -842,7 +809,6 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
             }
         }
 
-        
         if (spawnRateText != null)
         {
             if (spawnerDestroyed || isRespawning)
@@ -855,11 +821,9 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
             }
         }
 
-        
         UpdateHealthBar();
     }
 
-    
     private void UpdateHealthBar()
     {
         if (waveProgressBar != null)
@@ -868,7 +832,7 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
 
             if (spawnerDestroyed || isRespawning)
             {
-                healthPercentage = 0f; 
+                healthPercentage = 0f;
             }
             else
             {
@@ -877,12 +841,11 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
 
             waveProgressBar.value = healthPercentage;
 
-            
             if (progressBarFill != null)
             {
                 if (isRespawning)
                 {
-                    progressBarFill.color = Color.cyan; 
+                    progressBarFill.color = Color.cyan;
                 }
                 else if (healthPercentage > 0.6f)
                 {
@@ -900,21 +863,17 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
         }
     }
 
-
-
     public void OnEnemyDeath(GameObject enemyGameObject)
     {
         if (currentZombiesAlive.Contains(enemyGameObject))
         {
             currentZombiesAlive.Remove(enemyGameObject);
 
-            
             var screamerBehavior = enemyGameObject.GetComponent<ScreamerBehavior>();
             var exploderBehavior = enemyGameObject.GetComponent<ExploderBehavior>();
 
             ZombieMutation mutationType = ZombieMutation.Normal;
 
-            
             if (screamerBehavior != null)
             {
                 mutationType = ZombieMutation.Screamer;
@@ -925,7 +884,6 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
             }
             else
             {
-                
                 Renderer renderer = enemyGameObject.GetComponentInChildren<Renderer>();
                 if (renderer != null)
                 {
@@ -950,13 +908,20 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
         }
     }
 
+    private bool IsPositionInBounds(Vector3 position)
+    {
+        if (!hasBoundaries) return true;
+        return playAreaBounds.Contains(position);
+    }
+
+
     private Vector3 GetValidSpawnPosition(bool isBoss = false)
     {
         if (GlobalReferences.Instance?.player == null)
             return transform.position + Vector3.forward * minSpawnDistance;
 
         Vector3 playerPosition = GlobalReferences.Instance.player.transform.position;
-        Vector3 spawnerPosition = transform.position; 
+        Vector3 spawnerPosition = transform.position;
         int maxAttempts = 100;
         float bossMinDistance = isBoss ? minSpawnDistance + 10f : minSpawnDistance;
         float bossMaxDistance = isBoss ? minSpawnDistance + 20f : spawnRadius;
@@ -968,19 +933,22 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
 
             Vector3 spawnCandidate = spawnerPosition + new Vector3(
                 randomDir.x * randomDist,
-                spawnHeightOffset, 
+                spawnHeightOffset,
                 randomDir.y * randomDist
             );
 
             if (NavMesh.SamplePosition(spawnCandidate, out NavMeshHit hit, 10f, NavMesh.AllAreas))
             {
-                if (Vector3.Distance(playerPosition, hit.position) >= minSpawnDistance)
+                Vector3 validPosition = ClampToBoundaries(hit.position);
+
+                if (Vector3.Distance(playerPosition, validPosition) >= minSpawnDistance &&
+                    IsPositionInBounds(validPosition))
                 {
-                    
-                    return hit.position;
+                    return validPosition;
                 }
             }
         }
+
         for (int angle = 0; angle < 360; angle += 30)
         {
             float rad = angle * Mathf.Deg2Rad;
@@ -992,12 +960,10 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
 
             if (NavMesh.SamplePosition(fallbackPos, out NavMeshHit fallbackHit, 50f, NavMesh.AllAreas))
             {
-                
                 return fallbackHit.position;
             }
         }
 
-        
         Vector3 finalFallback = spawnerPosition + Vector3.forward * minSpawnDistance;
         Debug.LogWarning($"No valid NavMesh position found, using final fallback at {finalFallback}");
         return finalFallback;
@@ -1007,7 +973,6 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
     {
         UpdateUI();
 
-        
         if (isRespawning && spawnerHealthText != null)
         {
             respawnTimer -= Time.deltaTime;
@@ -1022,20 +987,8 @@ public class ZombieSpawnController : MonoBehaviour, IDamageable
             }
         }
     }
-
-    private void OnDrawGizmosSelected()
-    {
-        Vector3 spawnerPos = transform.position;
-
-        Gizmos.color = spawnerDestroyed ? Color.gray : Color.red;
-        Gizmos.DrawWireSphere(spawnerPos, minSpawnDistance);
-        Gizmos.color = spawnerDestroyed ? Color.gray : Color.yellow;
-        Gizmos.DrawWireSphere(spawnerPos, spawnRadius);
-
-        Gizmos.color = spawnerDestroyed ? Color.black : Color.green;
-        Gizmos.DrawWireCube(transform.position, Vector3.one * 2f);
-    }
 }
+
 public class ScreamerBehavior : MonoBehaviour
 {
     [HideInInspector] public float alertRadius = 20f;
@@ -1055,7 +1008,6 @@ public class ScreamerBehavior : MonoBehaviour
 
         float distanceToPlayer = Vector3.Distance(transform.position, player.position);
 
-        
         if (distanceToPlayer <= alertRadius && Time.time - lastScreamTime > cooldownTime)
         {
             PerformScream();
@@ -1065,72 +1017,42 @@ public class ScreamerBehavior : MonoBehaviour
 
     private void PerformScream()
     {
-        
-
-        
         Collider[] nearbyZombies = Physics.OverlapSphere(transform.position, alertRadius);
 
         foreach (Collider col in nearbyZombies)
         {
             if (col.gameObject != gameObject && col.GetComponent<Enemy>() != null)
             {
-                
                 Animator nearbyAnimator = col.GetComponent<Animator>();
                 if (nearbyAnimator != null)
                 {
-                    
                     nearbyAnimator.SetBool("isChasing", true);
-
-                    
-                    StartCoroutine(BoostChaseSpeed(nearbyAnimator, 1.5f, 8f));
+                    StartCoroutine(BoostZombieSpeed(col.gameObject, 1.5f, 8f));
                 }
             }
         }
     }
 
-    private IEnumerator BoostChaseSpeed(Animator animator, float multiplier, float duration)
+    private IEnumerator BoostZombieSpeed(GameObject zombie, float multiplier, float duration)
     {
-        if (animator == null) yield break;
+        if (zombie == null) yield break;
 
-        
-        var behaviors = animator.GetBehaviours<ZombieChaseState>();
-        float[] originalSpeeds = new float[behaviors.Length];
+        var navAgent = zombie.GetComponent<NavMeshAgent>();
+        var animator = zombie.GetComponent<Animator>();
 
-        
-        for (int i = 0; i < behaviors.Length; i++)
-        {
-            originalSpeeds[i] = behaviors[i].chaseSpeed;
-            behaviors[i].chaseSpeed *= multiplier;
-        }
+        if (navAgent == null || animator == null) yield break;
 
-        
-        NavMeshAgent agent = animator.GetComponent<NavMeshAgent>();
-        float originalAgentSpeed = 6f;
-        if (agent != null)
-        {
-            originalAgentSpeed = agent.speed;
-            agent.speed *= multiplier;
-        }
+        float UpdatedSpeedNav = navAgent.speed * multiplier;
+        float UpdatedSpeedAnim = animator.speed * multiplier;
+
+        navAgent.speed = UpdatedSpeedNav;
+        animator.speed = UpdatedSpeedAnim;  
 
         yield return new WaitForSeconds(duration);
 
-        
-        if (animator != null)
-        {
-            behaviors = animator.GetBehaviours<ZombieChaseState>();
-            for (int i = 0; i < behaviors.Length && i < originalSpeeds.Length; i++)
-            {
-                behaviors[i].chaseSpeed = originalSpeeds[i];
-            }
 
-            if (agent != null)
-            {
-                agent.speed = originalAgentSpeed;
-            }
-        }
     }
 }
-
 
 public class ExploderBehavior : MonoBehaviour
 {
@@ -1146,7 +1068,6 @@ public class ExploderBehavior : MonoBehaviour
         player = GameObject.FindGameObjectWithTag("Player")?.transform;
         enemyComponent = GetComponent<Enemy>();
 
-        
         StartCoroutine(PulseSize());
     }
 
@@ -1156,7 +1077,6 @@ public class ExploderBehavior : MonoBehaviour
 
         float distanceToPlayer = Vector3.Distance(transform.position, player.position);
 
-        
         if (distanceToPlayer <= explosionRange)
         {
             StartCoroutine(ExplodeAfterDelay(0.8f));
@@ -1167,14 +1087,12 @@ public class ExploderBehavior : MonoBehaviour
     {
         hasExploded = true;
 
-        
         NavMeshAgent agent = GetComponent<NavMeshAgent>();
         if (agent != null)
         {
             agent.isStopped = true;
         }
 
-        
         Animator animator = GetComponent<Animator>();
         if (animator != null)
         {
@@ -1189,27 +1107,74 @@ public class ExploderBehavior : MonoBehaviour
     private void Explode()
     {
         
+        if (CameraShaker.Instance && GlobalReferences.Instance?.player)
+        {
+            float distance = Vector3.Distance(transform.position, GlobalReferences.Instance.player.transform.position);
+            float maxShakeDistance = 20f;
+            float closeShakeIntensity = 0.2f;
+            float closeShakeDuration = 0.4f;
+            float farShakeIntensity = 0.04f;
+            float farShakeDuration = 0.15f;
+
+            if (distance <= maxShakeDistance)
+            {
+                float shakeIntensity = Mathf.Lerp(closeShakeIntensity, farShakeIntensity, distance / maxShakeDistance);
+                float shakeDuration = Mathf.Lerp(closeShakeDuration, farShakeDuration, distance / maxShakeDistance);
+                CameraShaker.Instance.TriggerShake(shakeDuration, shakeIntensity);
+            }
+        }
 
         
-        Collider[] affectedObjects = Physics.OverlapSphere(transform.position, explosionRange);
-
-        foreach (Collider col in affectedObjects)
+        if (GlobalReferences.Instance?.grenadeExplosionEffect != null)
         {
-            if (col.gameObject != gameObject)
-            {
-                
-                if (col.CompareTag("Player"))
-                {
-                    
-                    
-                }
+            Instantiate(GlobalReferences.Instance.grenadeExplosionEffect, transform.position, Quaternion.identity);
+        }
 
-                
-                Enemy enemy = col.GetComponent<Enemy>();
-                if (enemy != null && !enemy.isDead)
-                {
-                    enemy.TakeDamage(explosionDamage / 2);
-                }
+        if (SoundManager.Instance != null && SoundManager.Instance.throwablesChannel != null)
+        {
+            SoundManager.Instance.throwablesChannel.PlayOneShot(SoundManager.Instance.grenadeSound);
+        }
+
+        
+        float damageRadius = 20f;
+        float explosionForce = 1200f;
+        float maxDamage = 100f;
+        Collider[] colliders = Physics.OverlapSphere(transform.position, damageRadius);
+        HashSet<GameObject> damagedEntities = new HashSet<GameObject>();
+
+        foreach (Collider nearby in colliders)
+        {
+            Rigidbody rb = nearby.attachedRigidbody;
+            if (rb != null)
+            {
+                rb.AddExplosionForce(explosionForce, transform.position, damageRadius);
+            }
+
+            
+            GameObject rootObject = transform.root.gameObject;
+
+            
+            if (damagedEntities.Contains(rootObject)) return;
+            damagedEntities.Add(rootObject);
+
+            float distance = Vector3.Distance(transform.position, rootObject.transform.position);
+            int damage = Mathf.RoundToInt(
+                Mathf.Clamp(maxDamage * (1 - distance / damageRadius), 0, maxDamage)
+            );
+
+            
+            Enemy enemy = rootObject.GetComponent<Enemy>();
+            if (enemy)
+            {
+                enemy.TakeDamage(damage);
+                return;
+            }
+
+            
+            Player player = rootObject.GetComponent<Player>();
+            if (player)
+            {
+                player.TakeDamage(damage);
             }
         }
 
@@ -1226,9 +1191,70 @@ public class ExploderBehavior : MonoBehaviour
 
         while (!hasExploded && !enemyComponent.isDead)
         {
-            float pulse = (Mathf.Sin(Time.time * 5f) + 1f) * 0.05f; 
+            float pulse = (Mathf.Sin(Time.time * 5f) + 1f) * 0.05f;
             transform.localScale = originalScale + Vector3.one * pulse;
             yield return null;
+        }
+    }
+}
+
+public class BoundaryConstraint : MonoBehaviour
+{
+    private Bounds bounds;
+    private NavMeshAgent agent;
+    private float checkInterval = 0.5f;
+    private float lastCheckTime;
+
+    public void Initialize(Bounds playAreaBounds)
+    {
+        bounds = playAreaBounds;
+    }
+
+    private void Start()
+    {
+        agent = GetComponent<NavMeshAgent>();
+        lastCheckTime = Time.time;
+    }
+
+    private void Update()
+    {
+        if (Time.time - lastCheckTime > checkInterval)
+        {
+            lastCheckTime = Time.time;
+            ConstrainToBounds();
+        }
+    }
+
+    private void ConstrainToBounds()
+    {
+        if (bounds.size == Vector3.zero) return;
+
+        Vector3 currentPos = transform.position;
+        bool needsCorrection = false;
+        Vector3 correctedPos = currentPos;
+
+        if (!bounds.Contains(currentPos))
+        {
+            correctedPos = bounds.ClosestPoint(currentPos);
+            needsCorrection = true;
+        }
+
+        
+        float wallBuffer = 1.5f;
+        if (currentPos.x <= bounds.min.x + wallBuffer ||
+            currentPos.x >= bounds.max.x - wallBuffer ||
+            currentPos.z <= bounds.min.z + wallBuffer ||
+            currentPos.z >= bounds.max.z - wallBuffer)
+        {
+            
+            Vector3 centerDirection = (bounds.center - currentPos).normalized;
+            correctedPos = currentPos + centerDirection * wallBuffer;
+            needsCorrection = true;
+        }
+
+        if (needsCorrection && agent != null && agent.enabled)
+        {
+            agent.Warp(correctedPos);
         }
     }
 }
